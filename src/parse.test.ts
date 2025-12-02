@@ -15,6 +15,7 @@ describe("parse", () => {
 
     assert.deepStrictEqual(result, expected);
   });
+
   it("parses instances", () => {
     const expected = { name: "John Doe", age: 42 };
     const result = parse(`$User name,age\nUser("John Doe",42)`);

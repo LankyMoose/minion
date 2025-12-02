@@ -10,14 +10,21 @@ const SHAPES = new Map<string, TypeInfo>();
 const SEEN = new Set<any>(); // active recursion stack
 const CACHE = new Map<any, string>(); // finished objects → encoded form
 
+// JSON.stringify undefined rules:
+// - root → undefined (no output)
+// - array slot → "null"
+// - object property → omitted
+
 export function stringify(input: any): string {
+  // @ts-expect-error (same as JSON.stringify)
+  if (input === undefined) return undefined;
+
   typeCounter = 1;
   SHAPES.clear();
   SEEN.clear();
   CACHE.clear();
 
   const body = visit(input);
-
   const header = [...SHAPES.values()]
     .map((info) => `$${info.name} ${info.fields.join(",")}`)
     .join("\n");
@@ -25,7 +32,12 @@ export function stringify(input: any): string {
   return header + "\n" + body;
 }
 
-function visit(value: any): string {
+function visit(value: any, isArrayValue = false): string | undefined {
+  if (value === undefined) {
+    if (isArrayValue) return "null";
+    return undefined;
+  }
+
   // Primitive
   if (value === null) return "null";
   const t = typeof value;
@@ -44,17 +56,30 @@ function visit(value: any): string {
   SEEN.add(value);
   try {
     if (Array.isArray(value)) {
-      const parts = value.map(visit).join(",");
-      const str = `[${parts}]`;
+      const parts = value.map((v) => visit(v, true) ?? "null");
+      const str = `[${parts.join(",")}]`;
       CACHE.set(value, str);
       return str;
     }
 
     assert(t === "object", "Unsupported value: " + value);
 
-    const fields = Object.keys(value);
-    const info = getOrAssignType(fields);
-    const args = info.fields.map((f) => visit(value[f]));
+    const allFields = Object.keys(value);
+
+    // IMPORTANT: match JSON: undefined object props are omitted,
+    // but do NOT visit them here or type-definition order changes.
+    const keptFields = allFields.filter((k) => value[k] !== undefined);
+
+    // If all fields disappeared → use empty shape `{}`-equivalent
+    if (keptFields.length === 0) {
+      const info = getOrAssignType([]); // empty field list = empty shape
+      const str = `${info.name}()`; // same style as your non-empty shapes
+      CACHE.set(value, str);
+      return str;
+    }
+
+    const info = getOrAssignType(keptFields);
+    const args = info.fields.map((f) => visit(value[f])!);
     const str = `${info.name}(${args.join(",")})`;
     CACHE.set(value, str);
     return str;
