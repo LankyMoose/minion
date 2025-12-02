@@ -43,4 +43,10 @@ A("application/json",123)`;
 
     assert.strictEqual(result, expected);
   });
+  it("throws on circular references", () => {
+    const x: any = {};
+    x.self = x;
+
+    assert.throws(() => stringify(x), /Circular reference/);
+  });
 });

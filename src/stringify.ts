@@ -7,77 +7,70 @@ interface TypeInfo {
 
 let typeCounter = 1;
 const SHAPES = new Map<string, TypeInfo>();
+const SEEN = new Set<any>(); // active recursion stack
+const CACHE = new Map<any, string>(); // finished objects → encoded form
 
-/**
- * Converts a value to a string representation.
- *
- * Objects:
- * ```
- * stringify({ name: "John Doe", age: 42 });
- * // => `$User name,age\nUser("John Doe",42)`
- * ```
- * Arrays:
- * ```
- * stringify([ { name: "John Doe", age: 42 }, { name: "Jane Doe", age: 43 } ]);
- * // => `$User name,age\n[User("John Doe",42),User("Jane Doe",43)]`
- * ```
- */
-
-export function stringify(value: any): string {
-  SHAPES.clear();
+export function stringify(root: any): string {
   typeCounter = 1;
+  SHAPES.clear();
+  SEEN.clear();
+  CACHE.clear();
 
-  collectTypes(value);
-
-  const lines: string[] = [];
-  for (const info of SHAPES.values()) {
-    lines.push(`\$${info.name} ${info.fields.join(",")}`);
+  function getOrAssignType(fields: string[]): TypeInfo {
+    const signature = fields.join(",");
+    let info = SHAPES.get(signature);
+    if (!info) {
+      info = { name: alphaId(typeCounter++), fields };
+      SHAPES.set(signature, info);
+    }
+    return info;
   }
 
-  lines.push(stringifyValue(value));
+  function visit(value: any): string {
+    // Primitive
+    if (value === null) return "null";
+    const t = typeof value;
+    if (t === "string") return `"${value}"`;
+    if (t === "number") return String(value);
+    if (t === "boolean") return value ? "true" : "false";
 
-  return lines.join("\n");
-}
+    // Cached object result
+    if (CACHE.has(value)) return CACHE.get(value)!;
 
-function stringifyValue(value: any): string {
-  if (typeof value === "string") return `"${value}"`;
-  if (typeof value === "number") return String(value);
-  if (typeof value === "boolean") return value ? "true" : "false";
-  if (value === null) return "null";
+    // Cycle detection
+    if (SEEN.has(value)) {
+      throw new Error("Circular reference");
+    }
 
-  if (Array.isArray(value)) {
-    return "[" + value.map(stringifyValue).join(",") + "]";
+    SEEN.add(value);
+    try {
+      if (Array.isArray(value)) {
+        const parts = value.map(visit).join(",");
+        const str = `[${parts}]`;
+        CACHE.set(value, str);
+        return str;
+      }
+
+      assert(t === "object", "Unsupported value: " + value);
+
+      const fields = Object.keys(value);
+      const info = getOrAssignType(fields);
+      const args = info.fields.map((f) => visit(value[f]));
+      const str = `${info.name}(${args.join(",")})`;
+      CACHE.set(value, str);
+      return str;
+    } finally {
+      SEEN.delete(value);
+    }
   }
 
-  assert(typeof value === "object", "Unsupported value: " + value);
+  const body = visit(root);
 
-  const fields = Object.keys(value);
-  const type = SHAPES.get(fields.join(","))!;
-  const args = type.fields.map((f) => stringifyValue(value[f]));
-  return `${type.name}(${args.join(",")})`;
-}
+  const header = [...SHAPES.values()]
+    .map((info) => `$${info.name} ${info.fields.join(",")}`)
+    .join("\n");
 
-function collectTypes(value: any) {
-  if (value == null) return;
-  if (typeof value !== "object") return;
-  if (Array.isArray(value)) {
-    for (const v of value) collectTypes(v);
-    return;
-  }
-
-  const fields = Object.keys(value);
-  const signature = fields.join(",");
-
-  if (!SHAPES.has(signature)) {
-    SHAPES.set(signature, {
-      name: alphaId(typeCounter++),
-      fields,
-    });
-  }
-
-  for (const f of fields) {
-    collectTypes(value[f]);
-  }
+  return header + "\n" + body;
 }
 
 function alphaId(n: number): string {
