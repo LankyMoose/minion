@@ -1,10 +1,11 @@
 import { assert } from "./assert.js";
 
 const TYPE_DEFS = new Map<string, string[]>();
+const WHITESPACE_CHARS = new Set([" ", "\t", "\n", "\r"]);
 
 export function parse(text: string) {
   TYPE_DEFS.clear();
-  assert(typeof text === "string" && text.trim(), "invalid input");
+  assert(typeof text === "string", "invalid input");
 
   const lines = text
     .split("\n")
@@ -28,17 +29,21 @@ export function parse(text: string) {
 }
 
 function parseTypeDef(line: string): [name: string, ...fields: string[]] {
-  const space = line.indexOf(" ");
-  assert(space !== -1, "invalid type definition");
+  let i = 1;
+  // skip until whitespace to find end of name
+  for (; i < line.length; i++) {
+    const ch = line[i]!;
+    if (WHITESPACE_CHARS.has(ch)) break;
+  }
 
-  const name = line.slice(1, space);
+  const name = line.slice(1, i);
   assert(name.length > 0, "expected type name");
 
   const fields = line
-    .slice(space + 1)
+    .slice(i + 1)
     .trim()
-    .split(",");
-  assert(fields.length > 0, "expected at least one type field");
+    .split(",")
+    .filter(Boolean);
 
   return [name, ...fields];
 }
@@ -87,7 +92,7 @@ function parseArray(raw: string) {
   assert(raw.endsWith("]"), "expected ending ']'");
   const inner = raw.slice(1, -1).trim();
   if (!inner) return [];
-  return splitTopLevel(inner).map(parseObject);
+  return splitTopLevel(inner).map(parseValue);
 }
 
 function parseValue(v: string): unknown {
